@@ -500,7 +500,16 @@ def get_gemini_client():
     if genai is None:
         return None
 
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+    except Exception:
+        api_key = ""
+
+    api_key = str(api_key).strip()
+
+    if not api_key:
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+
     if not api_key:
         return None
 
