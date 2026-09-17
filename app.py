@@ -1,293 +1,144 @@
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from pathlib import Path
+from datetime import datetime
 import os
 import joblib
-from datetime import datetime
-from google import genai
+import plotly.graph_objects as go
+import plotly.express as px
 
 # =========================================================
-# PAGE CONFIG
+# PMAI // ULTRA INDUSTRIAL CONTROL CENTER
 # =========================================================
 st.set_page_config(
-    page_title="Predictive Maintenance",
+    page_title="PMAI | Predictive Maintenance",
     page_icon="⚙️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded",
 )
 
+# =========================================================
+# STATE
+# =========================================================
+defaults = {
+    "page": "Overview",
+    "current_prediction": None,
+    "chat_history": [],
+    "last_run": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # =========================================================
-# GEMINI CHAT STATE
-# =========================================================
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
-
-if "current_prediction" not in st.session_state:
-    st.session_state["current_prediction"] = None
-
-
-# =========================================================
-# PROFESSIONAL LIGHT UI
+# DESIGN SYSTEM
 # =========================================================
 st.markdown("""
 <style>
-    /* Global */
-    .stApp {
-        background: #f5f8fc;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-    .main .block-container {
-        max-width: 1380px;
-        padding: 2rem 2.2rem 3rem 2.2rem;
-    }
-
-    [data-testid="stHeader"] {
-        background: rgba(245,248,252,0.85);
-    }
-
-    /* Typography */
-    h1, h2, h3, p, label, div, span {
-        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    /* Header */
-    .hero {
-        background: linear-gradient(135deg, #ffffff 0%, #f1f7ff 100%);
-        border: 1px solid #dce8f5;
-        border-radius: 24px;
-        padding: 28px 32px;
-        margin-bottom: 22px;
-        box-shadow: 0 8px 30px rgba(35, 72, 110, 0.07);
-    }
-
-    .hero-title {
-        color: #142b45;
-        font-size: 34px;
-        font-weight: 800;
-        margin: 0;
-        letter-spacing: -0.8px;
-    }
-
-    .hero-subtitle {
-        color: #64748b;
-        font-size: 15px;
-        margin-top: 7px;
-    }
-
-    .status-pill {
-        display: inline-block;
-        margin-top: 15px;
-        padding: 7px 13px;
-        border-radius: 999px;
-        background: #eaf6f0;
-        color: #16724b;
-        border: 1px solid #ccebdc;
-        font-size: 12px;
-        font-weight: 700;
-    }
-
-    /* Section */
-    .section-header {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        color: #17324d;
-        font-size: 20px;
-        font-weight: 800;
-        margin: 12px 0 13px 2px;
-    }
-
-    .section-description {
-        color: #718096;
-        font-size: 13px;
-        margin: -5px 0 15px 2px;
-    }
-
-    /* Cards */
-    .card {
-        background: #ffffff;
-        border: 1px solid #e2eaf3;
-        border-radius: 18px;
-        padding: 21px 23px;
-        margin-bottom: 18px;
-        box-shadow: 0 5px 22px rgba(30, 65, 100, 0.055);
-    }
-
-    .mini-card {
-        background: #ffffff;
-        border: 1px solid #e2eaf3;
-        border-radius: 16px;
-        padding: 17px 19px;
-        min-height: 105px;
-        box-shadow: 0 4px 18px rgba(30, 65, 100, 0.045);
-    }
-
-    .mini-label {
-        color: #718096;
-        font-size: 12px;
-        font-weight: 650;
-        margin-bottom: 7px;
-    }
-
-    .mini-value {
-        color: #142b45;
-        font-size: 24px;
-        font-weight: 800;
-    }
-
-    .mini-unit {
-        color: #8a98a8;
-        font-size: 12px;
-        margin-left: 3px;
-        font-weight: 500;
-    }
-
-    /* Inputs */
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="input"] > div {
-        background: #ffffff !important;
-        border: 1px solid #d7e2ee !important;
-        border-radius: 11px !important;
-        color: #172b3f !important;
-        min-height: 44px;
-    }
-
-    input, textarea {
-        color: #172b3f !important;
-        background: #ffffff !important;
-    }
-
-    label {
-        color: #334155 !important;
-        font-size: 13px !important;
-        font-weight: 650 !important;
-    }
-
-    /* Main button */
-    .stButton > button {
-        width: 100%;
-        min-height: 50px;
-        border-radius: 12px;
-        border: 1px solid #0f766e;
-        background: #0f766e;
-        color: white;
-        font-size: 15px;
-        font-weight: 800;
-        box-shadow: 0 7px 18px rgba(15,118,110,0.18);
-        transition: 0.2s ease;
-    }
-
-    .stButton > button:hover {
-        background: #0d665f;
-        border-color: #0d665f;
-        transform: translateY(-1px);
-    }
-
-    /* Risk cards */
-    .risk-high {
-        background: linear-gradient(135deg, #fff5f5, #fffafa);
-        border: 1px solid #fecaca;
-        border-left: 6px solid #dc2626;
-        border-radius: 18px;
-        padding: 23px 25px;
-    }
-
-    .risk-low {
-        background: linear-gradient(135deg, #f0fdf8, #f9fffc);
-        border: 1px solid #bbebd4;
-        border-left: 6px solid #159a67;
-        border-radius: 18px;
-        padding: 23px 25px;
-    }
-
-    .risk-title {
-        font-size: 26px;
-        font-weight: 850;
-        margin: 0;
-    }
-
-    .risk-high .risk-title { color: #b91c1c; }
-    .risk-low .risk-title { color: #13734f; }
-
-    .risk-number {
-        color: #142b45;
-        font-size: 42px;
-        line-height: 1.05;
-        font-weight: 850;
-        margin: 8px 0;
-    }
-
-    .risk-text {
-        color: #64748b;
-        font-size: 13px;
-        margin: 0;
-    }
-
-    /* Probability */
-    .prob-wrap {
-        background: #eef3f8;
-        border-radius: 999px;
-        height: 12px;
-        overflow: hidden;
-        margin: 9px 0 18px 0;
-    }
-
-    .prob-fill {
-        height: 100%;
-        border-radius: 999px;
-    }
-
-    .prob-label {
-        display: flex;
-        justify-content: space-between;
-        color: #526477;
-        font-size: 12px;
-        font-weight: 650;
-    }
-
-    /* Tables */
-    .history-note {
-        color: #718096;
-        font-size: 13px;
-        margin-bottom: 12px;
-    }
-
-    /* Remove excess Streamlit top spacing */
-    .element-container {
-        margin-bottom: 0.35rem;
-    }
-
-    /* Chat readability */
-    [data-testid="stChatMessage"] {
-        border-radius: 14px;
-        margin-bottom: 10px;
-    }
-
-    [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
-        color: #1f2937 !important;
-    }
-
-    [data-testid="stChatMessage"] p,
-    [data-testid="stChatMessage"] li,
-    [data-testid="stChatMessage"] span {
-        color: #1f2937 !important;
-        opacity: 1 !important;
-    }
-
-    /* Footer */
-    .footer {
-        text-align: center;
-        color: #94a3b8;
-        font-size: 12px;
-        padding: 28px 0 5px 0;
-    }
+:root{
+ --bg:#050b14; --panel:#0a1422; --panel2:#0d1b2c;
+ --line:#18304a; --line2:#224663; --text:#edf6ff; --muted:#7890a8;
+ --cyan:#2dd4e5; --blue:#4d8dff; --green:#35d49a;
+ --red:#ff5b70; --amber:#f2c14e;
+}
+*{font-family:Inter,sans-serif}
+.stApp{
+ background:
+ radial-gradient(circle at 80% -10%,rgba(45,212,229,.12),transparent 28%),
+ radial-gradient(circle at 0% 35%,rgba(77,141,255,.08),transparent 25%),
+ var(--bg);
+ color:var(--text);
+}
+.main .block-container{max-width:1600px;padding:1.1rem 2rem 3rem}
+[data-testid="stSidebar"]{background:#040a12;border-right:1px solid var(--line)}
+[data-testid="stSidebar"] *{color:var(--text)}
+[data-testid="stSidebar"] .stButton>button{
+ background:#081522!important;border:1px solid #132b42!important;
+ text-align:left!important;min-height:42px!important;color:#b9cada!important;
+}
+[data-testid="stSidebar"] .stButton>button:hover{
+ border-color:var(--cyan)!important;color:white!important;
+}
+.brand{padding:8px 4px 22px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.brand-main{font-size:27px;font-weight:800;letter-spacing:-1px}
+.brand-main b{color:var(--cyan)}
+.brand-sub{font-size:9px;color:#5e7891;letter-spacing:2px;margin-top:4px}
+.nav-label{font-size:9px;color:#5e7891;font-weight:800;letter-spacing:1.5px;margin:12px 0 8px}
+.side-status{border:1px solid var(--line);border-radius:14px;padding:13px;margin-top:15px;background:#07111d}
+.side-status div{font-size:11px;color:#8ea6bc;margin:7px 0}
+.side-status strong{color:white}
+.topbar{
+ display:flex;justify-content:space-between;align-items:center;
+ background:rgba(9,22,36,.78);border:1px solid var(--line);
+ border-radius:15px;padding:11px 16px;margin-bottom:16px;
+}
+.topbar-left{font-size:10px;letter-spacing:1.5px;color:#8da6bc;font-weight:800}
+.live{font-size:10px;color:#4de0a6;font-weight:800}
+.hero{
+ background:linear-gradient(135deg,#0d253c,#081421 58%,#0b1d30);
+ border:1px solid #20415d;border-radius:25px;padding:27px 30px;
+ position:relative;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.22)
+}
+.hero:after{
+ content:"";position:absolute;right:-85px;top:-125px;width:300px;height:300px;
+ border-radius:50%;border:1px solid rgba(45,212,229,.2);
+ box-shadow:0 0 0 40px rgba(45,212,229,.025),0 0 0 80px rgba(45,212,229,.018)
+}
+.kicker{font-size:9px;color:var(--cyan);font-weight:800;letter-spacing:2px}
+.hero h1{font-size:36px;line-height:1.1;margin:8px 0;color:white;letter-spacing:-1.2px}
+.hero p{font-size:12px;line-height:1.7;color:#8fa7bd;max-width:760px}
+.badge{display:inline-block;margin-top:10px;padding:6px 10px;border-radius:999px;
+ background:rgba(53,212,154,.07);border:1px solid rgba(53,212,154,.25);
+ color:#64dfae;font-size:9px;font-weight:800;letter-spacing:.8px}
+.section{font-size:18px;font-weight:800;color:white;margin:23px 0 3px}
+.sub{font-size:11px;color:#667f96;margin-bottom:12px}
+.card{background:linear-gradient(145deg,#0c1b2c,#081522);border:1px solid var(--line);
+ border-radius:17px;padding:17px;box-shadow:0 10px 30px rgba(0,0,0,.13)}
+.kpi{background:linear-gradient(145deg,#0d2135,#081522);border:1px solid var(--line);
+ border-radius:17px;padding:16px;min-height:112px}
+.kpi-label{font-size:9px;color:#668097;font-weight:800;letter-spacing:1.1px}
+.kpi-value{font-size:27px;font-weight:800;color:white;margin-top:7px}
+.kpi-foot{font-size:10px;color:#526b82;margin-top:4px}
+.telemetry{background:#081624;border:1px solid #17314b;border-radius:14px;padding:13px}
+.telemetry .name{font-size:10px;color:#7891a7;font-weight:700}
+.telemetry .value{font-size:22px;font-weight:800;color:white;margin-top:3px}
+.telemetry .unit{font-size:9px;color:#5f7890}
+.risk-high{background:linear-gradient(145deg,#35141f,#170d15);border:1px solid #733141}
+.risk-low{background:linear-gradient(145deg,#0d3029,#091b1d);border:1px solid #1d6656}
+.risk{border-radius:20px;padding:23px;min-height:205px}
+.risk-label{font-size:9px;color:#7790a6;letter-spacing:1.3px;font-weight:800}
+.risk-title{font-size:30px;font-weight:800;margin:7px 0}
+.risk-high .risk-title{color:#ff6f81}.risk-low .risk-title{color:#55dba8}
+.risk-number{font-size:46px;font-weight:800;color:white;line-height:1}
+.risk-note{font-size:11px;color:#8299ad;margin-top:12px;line-height:1.6}
+.ai{background:linear-gradient(145deg,#0c2035,#091521);border:1px solid #225072;
+ border-radius:19px;padding:20px}
+.ai-title{color:#6fe3eb;font-size:12px;font-weight:800;letter-spacing:.5px}
+.ai-sub{color:#607b93;font-size:10px;margin-top:4px}
+.divider{height:1px;background:var(--line);margin:17px 0}
+.alert{padding:13px 15px;border-radius:13px;margin:7px 0;font-size:11px;line-height:1.55}
+.alert-red{background:#251019;border:1px solid #592535;color:#ff9aaa}
+.alert-green{background:#09231d;border:1px solid #1d5b4b;color:#77ddb5}
+.alert-amber{background:#241d0c;border:1px solid #5c4b1d;color:#e9ca71}
+.stButton>button{border-radius:11px!important;min-height:43px!important;
+ background:#0b1b2c!important;border:1px solid #1c3b56!important;color:#dceaf5!important;font-weight:700!important}
+.stButton>button:hover{border-color:var(--cyan)!important;color:white!important}
+div[data-baseweb="select"]>div,div[data-baseweb="input"]>div{
+ background:#081726!important;border:1px solid #1b3853!important;border-radius:10px!important}
+input,textarea{background:#081726!important;color:white!important}
+label{color:#8fa6bb!important;font-size:11px!important;font-weight:700!important}
+[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:13px}
+[data-testid="stChatMessage"]{background:#091827;border:1px solid #17334c;border-radius:14px}
+.footer{text-align:center;color:#3f5970;font-size:9px;padding:35px 0 5px;letter-spacing:1px}
 </style>
 """, unsafe_allow_html=True)
 
 # =========================================================
-# MODEL
+# MODEL / HISTORY
 # =========================================================
 @st.cache_resource
 def load_model():
@@ -302,705 +153,438 @@ except Exception as e:
 
 HISTORY_FILE = "prediction_history.csv"
 
-
-def save_prediction(record):
-    new_record = pd.DataFrame([record])
-
-    if Path(HISTORY_FILE).exists():
-        old_history = pd.read_csv(HISTORY_FILE)
-        history = pd.concat([old_history, new_record], ignore_index=True)
-    else:
-        history = new_record
-
-    history.to_csv(HISTORY_FILE, index=False)
-
-
 def load_history():
     if Path(HISTORY_FILE).exists():
-        return pd.read_csv(HISTORY_FILE)
+        try:
+            return pd.read_csv(HISTORY_FILE)
+        except Exception:
+            pass
     return pd.DataFrame()
 
+def save_prediction(record):
+    old = load_history()
+    new = pd.DataFrame([record])
+    result = pd.concat([old, new], ignore_index=True) if not old.empty else new
+    result.to_csv(HISTORY_FILE, index=False)
 
 # =========================================================
-# HEADER
-# =========================================================
-st.markdown("""
-<div class="hero">
-    <div class="hero-title">⚙️ Predictive Maintenance</div>
-    <div class="hero-subtitle">
-        Machine failure prediction dashboard powered by CatBoost
-    </div>
-    <div class="status-pill">● MODEL ONLINE &nbsp; • &nbsp; 24-HOUR FAILURE PREDICTION</div>
-</div>
-""", unsafe_allow_html=True)
-
-# =========================================================
-# MACHINE INFORMATION
-# =========================================================
-st.markdown('<div class="section-header">🔧 Machine Configuration</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-description">Select the machine and its current operating condition.</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown('<div class="card">', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
-
-with c1:
-    machine_type = st.selectbox(
-        "Machine Type",
-        ["CNC", "Pump", "Compressor", "Robotic Arm"]
-    )
-
-with c2:
-    operating_mode = st.selectbox(
-        "Operating Mode",
-        ["idle", "normal", "peak"]
-    )
-
-with c3:
-    hour = st.selectbox(
-        "Operating Hour",
-        list(range(24)),
-        index=12,
-        format_func=lambda x: f"{x:02d}:00"
-    )
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# =========================================================
-# SENSOR READINGS
-# =========================================================
-st.markdown('<div class="section-header">📡 Live Sensor Readings</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-description">Enter the latest measurements collected from the machine.</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown('<div class="card">', unsafe_allow_html=True)
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    vibration_rms = st.number_input(
-        "Vibration RMS", min_value=0.0, value=1.0, step=0.01
-    )
-
-with c2:
-    temperature_motor = st.number_input(
-        "Motor Temperature (°C)", value=70.0, step=0.1
-    )
-
-with c3:
-    current_phase_avg = st.number_input(
-        "Average Phase Current (A)", min_value=0.0, value=10.0, step=0.1
-    )
-
-with c4:
-    pressure_level = st.number_input(
-        "Pressure Level", min_value=0.0, value=5.0, step=0.1
-    )
-
-c5, c6, c7, c8 = st.columns(4)
-
-with c5:
-    rpm = st.number_input(
-        "RPM", min_value=0.0, value=1500.0, step=10.0
-    )
-
-with c6:
-    hours_since_maintenance = st.number_input(
-        "Hours Since Maintenance", min_value=0.0, value=100.0, step=1.0
-    )
-
-with c7:
-    ambient_temp = st.number_input(
-        "Ambient Temperature (°C)", value=25.0, step=0.1
-    )
-
-with c8:
-    timestamp = st.date_input("Date", value=datetime.now().date())
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# =========================================================
-# LIVE FEATURE PREVIEW
-# =========================================================
-temperature_difference = temperature_motor - ambient_temp
-vibration_rpm_ratio = vibration_rms / (rpm + 1)
-current_rpm_ratio = current_phase_avg / (rpm + 1)
-pressure_rpm_ratio = pressure_level / (rpm + 1)
-maintenance_load = hours_since_maintenance * rpm
-day_of_week = timestamp.weekday()
-month = timestamp.month
-
-st.markdown('<div class="section-header">🧮 Calculated Features</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-description">Features generated automatically before the model prediction.</div>',
-    unsafe_allow_html=True
-)
-
-feature_cols = st.columns(5)
-
-features = [
-    ("Temperature Δ", f"{temperature_difference:.2f}", "°C"),
-    ("Vibration / RPM", f"{vibration_rpm_ratio:.5f}", ""),
-    ("Current / RPM", f"{current_rpm_ratio:.5f}", ""),
-    ("Pressure / RPM", f"{pressure_rpm_ratio:.5f}", ""),
-    ("Maintenance Load", f"{maintenance_load:,.0f}", ""),
-]
-
-for col, (label, value, unit) in zip(feature_cols, features):
-    with col:
-        st.markdown(
-            f"""
-            <div class="mini-card">
-                <div class="mini-label">{label}</div>
-                <div class="mini-value">{value}<span class="mini-unit">{unit}</span></div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-st.write("")
-
-# =========================================================
-# PREDICT
-# =========================================================
-predict_col1, predict_col2, predict_col3 = st.columns([1, 2, 1])
-with predict_col2:
-    predict_clicked = st.button("🔍  Predict Machine Failure", use_container_width=True)
-
-
-# =========================================================
-# GEMINI CONFIGURATION
+# GEMINI
 # =========================================================
 try:
     from google import genai
 except ImportError:
     genai = None
 
-GEMINI_MODEL = "gemini-3.6-flash"
-GEMINI_FALLBACK_MODEL = "gemini-3.5-flash-lite"
-
-GEMINI_SYSTEM_PROMPT = """
-You are a professional Predictive Maintenance AI Assistant.
-You analyze the current machine data and explain the CatBoost prediction.
-
-Rules:
-- Use only the machine data and prediction supplied by the application.
-- Never invent sensor readings, probabilities, history, or failures.
-- Do not change or override the CatBoost prediction.
-- A prediction is not proof that a mechanical failure has occurred.
-- Give practical, concise maintenance guidance.
-- Explain technical concepts simply when appropriate.
-"""
-
-def get_gemini_client():
+def gemini_client():
     if genai is None:
-        return None
-
+        return None, "google-genai is not installed."
+    key = ""
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
     except Exception:
-        api_key = ""
-
-    api_key = str(api_key).strip()
-
-    if not api_key:
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-
-    if not api_key:
-        return None
-
-    return genai.Client(api_key=api_key)
-
-def get_recent_history():
-    history = load_history()
-    if history.empty:
-        return "No previous prediction history is available."
-    return str(history.tail(10).to_dict(orient="records"))
-
-def generate_gemini_response(client, prompt):
-    """Call Gemini with automatic retry and a stable fallback model.
-
-    503/UNAVAILABLE can happen when a model is temporarily under heavy load.
-    Retry briefly, then fall back to Gemini 3.5 Flash-Lite.
-    """
-    import time
-
-    last_error = None
-    for attempt in range(3):
-        try:
-            return client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config={"system_instruction": GEMINI_SYSTEM_PROMPT}
-            )
-        except Exception as e:
-            last_error = e
-            error_text = str(e)
-            is_temporary = (
-                "503" in error_text
-                or "UNAVAILABLE" in error_text
-                or "high demand" in error_text.lower()
-                or "temporarily" in error_text.lower()
-            )
-            if not is_temporary:
-                raise
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-
-    # Fallback model after repeated 503 errors.
+        pass
+    if not key:
+        key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not key:
+        return None, "GEMINI_API_KEY was not found."
     try:
-        return client.models.generate_content(
-            model=GEMINI_FALLBACK_MODEL,
-            contents=prompt,
-            config={"system_instruction": GEMINI_SYSTEM_PROMPT}
-        )
-    except Exception:
-        raise last_error
-
-def machine_context(record):
-    if not record:
-        return "No current prediction has been generated yet."
-
-    return f"""
-Machine Type: {record.get("Machine Type")}
-Operating Mode: {record.get("Operating Mode")}
-Date: {record.get("Date")}
-Operating Hour: {record.get("Operating Hour")}
-Vibration RMS: {record.get("Vibration RMS")}
-Motor Temperature: {record.get("Motor Temperature")} °C
-Average Phase Current: {record.get("Average Phase Current")} A
-Pressure Level: {record.get("Pressure Level")}
-RPM: {record.get("RPM")}
-Hours Since Maintenance: {record.get("Hours Since Maintenance")}
-Ambient Temperature: {record.get("Ambient Temperature")} °C
-Temperature Difference: {record.get("Temperature Difference")}
-Vibration/RPM Ratio: {record.get("Vibration/RPM Ratio")}
-Current/RPM Ratio: {record.get("Current/RPM Ratio")}
-Pressure/RPM Ratio: {record.get("Pressure/RPM Ratio")}
-Maintenance Load: {record.get("Maintenance Load")}
-Prediction: {record.get("Prediction")}
-Failure Probability: {record.get("Failure Probability")}%
-Normal Probability: {record.get("Normal Probability")}%
-"""
-
-def ask_gemini(question, current_record=None):
-    client = get_gemini_client()
-
-    if client is None:
-        return (
-            "⚠️ Gemini is not connected.\n\n"
-            "Run `pip install -U google-genai` and set `GEMINI_API_KEY` "
-            "before starting Streamlit."
-        )
-
-    prompt = f"""
-CURRENT MACHINE DATA:
-{machine_context(current_record)}
-
-RECENT PREDICTION HISTORY:
-{get_recent_history()}
-
-USER QUESTION:
-{question}
-
-Answer directly and professionally. Use the current machine data when relevant.
-"""
-    try:
-        response = generate_gemini_response(client, prompt)
-        return response.text.strip()
+        return genai.Client(api_key=key), None
     except Exception as e:
-        error_text = str(e)
-        if "503" in error_text or "UNAVAILABLE" in error_text or "high demand" in error_text.lower():
-            return (
-                "⚠️ Gemini is temporarily busy (503). The app already retried "
-                "and tried the fallback Gemini 3.5 Flash-Lite model. Please try "
-                "Predict again in a few seconds."
-            )
-        if "404" in error_text and ("gemini-2.5-flash" in error_text or "not found" in error_text.lower()):
-            return (
-                "⚠️ Gemini model was unavailable. The app is configured for "
-                "Gemini 3.6 Flash with a fallback model. Restart Streamlit and try again."
-            )
-        return f"⚠️ Gemini error: {error_text}"
+        return None, str(e)
 
-def gemini_analysis(record):
-    """Generate the AI Analysis for the current prediction using Gemini."""
-    client = get_gemini_client()
-
-    if client is None:
-        return (
-            "⚠️ Gemini is not connected.\n\n"
-            "Set the GEMINI_API_KEY environment variable and restart Streamlit."
-        )
-
-    prompt = f"""
-CURRENT MACHINE DATA
-{machine_context(record)}
-
-RECENT PREDICTION HISTORY
-{get_recent_history()}
-
-Analyze this CatBoost prediction for the user.
-
-Use exactly these sections:
-
-### Why this result?
-Give 2-4 concise points based ONLY on the supplied machine data.
-
-### Recommended action
-Give 2-4 practical predictive-maintenance actions.
-
-### Important note
-State briefly that the CatBoost result is a prediction and does not confirm
-that a mechanical failure has occurred.
-
-Do not invent any values or facts.
-"""
-
-    try:
-        response = generate_gemini_response(client, prompt)
-        return response.text.strip()
-    except Exception as e:
-        error_text = str(e)
-        if "503" in error_text or "UNAVAILABLE" in error_text or "high demand" in error_text.lower():
-            return (
-                "⚠️ Gemini is temporarily busy (503). The app already retried "
-                "and tried the fallback Gemini 3.5 Flash-Lite model. Please try "
-                "Predict again in a few seconds."
-            )
-        if "404" in error_text and ("gemini-2.5-flash" in error_text or "not found" in error_text.lower()):
-            return (
-                "⚠️ Gemini model was unavailable. The app is configured for "
-                "Gemini 3.6 Flash with a fallback model. Restart Streamlit and try again."
-            )
-        return f"⚠️ Gemini error: {error_text}"
-
-
-# =========================================================
-# PREDICTION
-# =========================================================
-if predict_clicked:
-
-    input_data = pd.DataFrame({
-        "machine_type": [machine_type],
-        "vibration_rms": [vibration_rms],
-        "temperature_motor": [temperature_motor],
-        "current_phase_avg": [current_phase_avg],
-        "pressure_level": [pressure_level],
-        "rpm": [rpm],
-        "operating_mode": [operating_mode],
-        "hours_since_maintenance": [hours_since_maintenance],
-        "ambient_temp": [ambient_temp],
-        "hour": [hour],
-        "day_of_week": [day_of_week],
-        "month": [month],
-        "temperature_difference": [temperature_difference],
-        "vibration_rpm_ratio": [vibration_rpm_ratio],
-        "current_rpm_ratio": [current_rpm_ratio],
-        "pressure_rpm_ratio": [pressure_rpm_ratio],
-        "maintenance_load": [maintenance_load]
+def machine_context(r):
+    if not r:
+        return "No current prediction."
+    return str({
+        "machine_type": r.get("Machine Type"),
+        "operating_mode": r.get("Operating Mode"),
+        "vibration_rms": r.get("Vibration RMS"),
+        "motor_temperature": r.get("Motor Temperature"),
+        "current": r.get("Average Phase Current"),
+        "pressure": r.get("Pressure Level"),
+        "rpm": r.get("RPM"),
+        "hours_since_maintenance": r.get("Hours Since Maintenance"),
+        "ambient_temperature": r.get("Ambient Temperature"),
+        "temperature_difference": r.get("Temperature Difference"),
+        "maintenance_load": r.get("Maintenance Load"),
+        "prediction": r.get("Prediction"),
+        "failure_probability": r.get("Failure Probability"),
     })
 
+def ask_gemini(question):
+    client, err = gemini_client()
+    if client is None:
+        return f"⚠️ Gemini is not connected.\n\n{err}"
+    prompt = f"""
+You are a professional predictive-maintenance AI assistant.
+Use ONLY the supplied machine data. Do not invent measurements.
+Do not override the CatBoost prediction. A prediction is not proof
+that a physical failure has occurred.
+
+MACHINE DATA:
+{machine_context(st.session_state.current_prediction)}
+
+QUESTION:
+{question}
+
+Answer professionally and concisely. Give practical maintenance guidance.
+"""
     try:
-        with st.spinner("Running predictive model..."):
-            prediction = model.predict(input_data)[0]
-            probability = model.predict_proba(input_data)[0][1]
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=prompt
+        )
+        return response.text.strip()
     except Exception as e:
-        st.error("Prediction failed.")
-        st.code(str(e))
-        st.stop()
-
-    failure_percentage = probability * 100
-    normal_percentage = 100 - failure_percentage
-
-    prediction_record = {
-        "Saved At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Machine Type": machine_type,
-        "Operating Mode": operating_mode,
-        "Date": str(timestamp),
-        "Operating Hour": hour,
-        "Vibration RMS": vibration_rms,
-        "Motor Temperature": temperature_motor,
-        "Average Phase Current": current_phase_avg,
-        "Pressure Level": pressure_level,
-        "RPM": rpm,
-        "Hours Since Maintenance": hours_since_maintenance,
-        "Ambient Temperature": ambient_temp,
-        "Day of Week": day_of_week,
-        "Month": month,
-        "Temperature Difference": temperature_difference,
-        "Vibration/RPM Ratio": vibration_rpm_ratio,
-        "Current/RPM Ratio": current_rpm_ratio,
-        "Pressure/RPM Ratio": pressure_rpm_ratio,
-        "Maintenance Load": maintenance_load,
-        "Prediction": "HIGH RISK" if prediction == 1 else "LOW RISK",
-        "Failure Probability": round(failure_percentage, 2),
-        "Normal Probability": round(normal_percentage, 2)
-    }
-
-    save_prediction(prediction_record)
-    st.session_state["current_prediction"] = prediction_record
-
-    # =====================================================
-    # RESULT
-    # =====================================================
-    st.markdown("---")
-    st.markdown('<div class="section-header">🎯 Prediction Result</div>', unsafe_allow_html=True)
-
-    if prediction == 1:
-        st.markdown(
-            f"""
-            <div class="risk-high">
-                <div class="risk-title">🚨 HIGH RISK</div>
-                <div class="risk-number">{failure_percentage:.2f}%</div>
-                <p class="risk-text">
-                    The model predicts a machine failure within the next 24 hours.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-    else:
-        st.markdown(
-            f"""
-            <div class="risk-low">
-                <div class="risk-title">✅ LOW RISK</div>
-                <div class="risk-number">{failure_percentage:.2f}%</div>
-                <p class="risk-text">
-                    The model does not predict a machine failure within the next 24 hours.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.write("")
-
-    # Probability cards
-    p1, p2 = st.columns(2)
-
-    with p1:
-        st.markdown(
-            f"""
-            <div class="card">
-                <div class="mini-label">FAILURE PROBABILITY</div>
-                <div class="mini-value">{failure_percentage:.2f}%</div>
-                <div class="prob-wrap">
-                    <div class="prob-fill" style="width:{min(failure_percentage,100):.2f}%; background:#dc2626;"></div>
-                </div>
-                <div class="prob-label">
-                    <span>Predicted failure</span>
-                    <span>{failure_percentage:.2f}%</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with p2:
-        st.markdown(
-            f"""
-            <div class="card">
-                <div class="mini-label">NORMAL PROBABILITY</div>
-                <div class="mini-value">{normal_percentage:.2f}%</div>
-                <div class="prob-wrap">
-                    <div class="prob-fill" style="width:{min(normal_percentage,100):.2f}%; background:#159a67;"></div>
-                </div>
-                <div class="prob-label">
-                    <span>Normal operation</span>
-                    <span>{normal_percentage:.2f}%</span>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    # =====================================================
-    # GEMINI AI ANALYSIS
-    # =====================================================
-    st.markdown('<div class="section-header">🤖 Gemini AI Analysis</div>', unsafe_allow_html=True)
-
-    with st.spinner("Gemini is analyzing the prediction..."):
-        ai_analysis = gemini_analysis(prediction_record)
-
-    st.markdown(
-        f"""
-        <div class="card">
-            <div style="color:#2563eb;font-size:16px;font-weight:800;margin-bottom:10px;">
-                Gemini LLM Interpretation
-            </div>
-            <div style="color:#334155;font-size:14px;line-height:1.75;white-space:pre-wrap;">
-                {ai_analysis}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    # Sensor snapshot
-    st.markdown('<div class="section-header">📊 Sensor Snapshot</div>', unsafe_allow_html=True)
-
-    s1, s2, s3, s4, s5 = st.columns(5)
-    snapshot = [
-        ("Vibration", f"{vibration_rms:.2f}", "RMS"),
-        ("Temperature", f"{temperature_motor:.1f}", "°C"),
-        ("Current", f"{current_phase_avg:.1f}", "A"),
-        ("Pressure", f"{pressure_level:.2f}", ""),
-        ("RPM", f"{rpm:,.0f}", "RPM")
-    ]
-
-    for col, (label, value, unit) in zip([s1, s2, s3, s4, s5], snapshot):
-        with col:
-            st.markdown(
-                f"""
-                <div class="mini-card">
-                    <div class="mini-label">{label}</div>
-                    <div class="mini-value">{value}<span class="mini-unit">{unit}</span></div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    # Input details
-    st.write("")
-    with st.expander("📋 View Model Input & Engineered Features"):
-        st.dataframe(
-            input_data,
-            use_container_width=True,
-            hide_index=True
-        )
+        return f"⚠️ Gemini error: {e}"
 
 # =========================================================
-# GEMINI AI CHATBOT
+# SIDEBAR
 # =========================================================
-st.markdown("---")
-st.markdown('<div class="section-header">💬 Gemini AI Maintenance Assistant</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="section-description">Talk naturally with Gemini about the current machine, prediction, sensors, and maintenance.</div>',
-    unsafe_allow_html=True
-)
-
-chat_card_start = '<div class="card">'
-st.markdown(chat_card_start, unsafe_allow_html=True)
-
-quick_cols = st.columns(4)
-quick_questions = [
-    "Why is this machine high risk?",
-    "Which sensor is most concerning?",
-    "What maintenance should I do?",
-    "Explain the prediction simply."
-]
-
-for i, q in enumerate(quick_questions):
-    if quick_cols[i].button(q, key=f"gemini_quick_{i}"):
-        st.session_state["chat_history"].append({"role": "user", "content": q})
-        answer = ask_gemini(q, st.session_state.get("current_prediction"))
-        st.session_state["chat_history"].append({"role": "assistant", "content": answer})
-        st.rerun()
-
-for message in st.session_state.get("chat_history", []):
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-question = st.chat_input("Ask Gemini about your machine...")
-if question:
-    st.session_state["chat_history"].append({"role": "user", "content": question})
-    answer = ask_gemini(question, st.session_state.get("current_prediction"))
-    st.session_state["chat_history"].append({"role": "assistant", "content": answer})
-    st.rerun()
-
-if st.session_state.get("chat_history"):
-    if st.button("🗑️ Clear Conversation", key="clear_gemini_chat"):
-        st.session_state["chat_history"] = []
-        st.rerun()
-
-st.markdown("</div>", unsafe_allow_html=True)
-
-# =========================================================
-# HISTORY
-# =========================================================
-st.markdown("---")
-st.markdown('<div class="section-header">📚 Prediction History</div>', unsafe_allow_html=True)
-
 history = load_history()
+total = len(history)
+high = int((history["Prediction"] == "HIGH RISK").sum()) if "Prediction" in history.columns else 0
 
-if history.empty:
-    st.info("No predictions have been saved yet. Run your first prediction above.")
-else:
-    st.markdown(
-        f'<div class="history-note">{len(history)} prediction(s) saved automatically.</div>',
-        unsafe_allow_html=True
-    )
+with st.sidebar:
+    st.markdown("""
+    <div class="brand">
+      <div class="brand-main">⚙️ PM<b>AI</b></div>
+      <div class="brand-sub">Industrial Intelligence</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    display_history = history.iloc[::-1].reset_index(drop=True)
+    st.markdown('<div class="nav-label">CONTROL CENTER</div>', unsafe_allow_html=True)
+    nav = ["Overview", "Predictive Monitor", "Analytics", "AI Assistant"]
+    for item in nav:
+        if st.button(item, key="nav_"+item, use_container_width=True):
+            st.session_state.page = item
+            st.rerun()
 
-    # Compact summary
-    h1, h2, h3 = st.columns(3)
+    st.markdown('<div class="nav-label">SYSTEM</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="side-status">
+      <div>● Model <strong>ONLINE</strong></div>
+      <div>▣ Engine <strong>CatBoost</strong></div>
+      <div>◉ Window <strong>24 HOURS</strong></div>
+      <div>⌁ Predictions <strong>{total}</strong></div>
+      <div>⚠ Alerts <strong>{high}</strong></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    total = len(history)
-    high_count = int((history["Prediction"] == "HIGH RISK").sum()) if "Prediction" in history.columns else 0
-    low_count = total - high_count
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.caption("PMAI v2.0 • Predictive Maintenance")
 
-    with h1:
-        st.markdown(
-            f"""
-            <div class="mini-card">
-                <div class="mini-label">TOTAL PREDICTIONS</div>
-                <div class="mini-value">{total}</div>
+# =========================================================
+# TOP
+# =========================================================
+st.markdown("""
+<div class="topbar">
+  <div class="topbar-left">PMAI / INDUSTRIAL AI OPERATIONS CENTER</div>
+  <div class="live">● LIVE SYSTEM • MODEL ONLINE</div>
+</div>
+<div class="hero">
+  <div class="kicker">INDUSTRIAL INTELLIGENCE PLATFORM</div>
+<h1>predictive maintenance</h1>
+<p>AI-Powered Industrial Failure Prediction & Monitoring</p>  <p>
+    An AI-assisted predictive-maintenance control center for detecting
+    machine-failure risk within the next 24 hours using a trained CatBoost model.
+  </p>
+  <span class="badge">CATBOOST ONLINE &nbsp; • &nbsp; REAL-TIME INPUT &nbsp; • &nbsp; 24H RISK WINDOW</span>
+</div>
+""", unsafe_allow_html=True)
+
+# =========================================================
+# OVERVIEW
+# =========================================================
+if st.session_state.page == "Overview":
+    avg_prob = float(history["Failure Probability"].mean()) if "Failure Probability" in history.columns and not history.empty else 0
+    latest = history.iloc[-1] if not history.empty else None
+
+    st.markdown('<div class="section">Mission Overview</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub">Operational summary of the predictive-maintenance system.</div>', unsafe_allow_html=True)
+
+    k = st.columns(5)
+    vals = [
+        ("MODEL", "CATBOOST", "Production model"),
+        ("PREDICTIONS", total, "Analyses stored"),
+        ("HIGH RISK", high, "Risk predictions"),
+        ("AVG RISK", f"{avg_prob:.1f}%", "Historical average"),
+        ("STATUS", "ONLINE", "Inference ready"),
+    ]
+    for col,(lab,val,foot) in zip(k,vals):
+        with col:
+            st.markdown(f"""<div class="kpi"><div class="kpi-label">{lab}</div>
+            <div class="kpi-value">{val}</div><div class="kpi-foot">{foot}</div></div>""",unsafe_allow_html=True)
+
+    st.markdown('<div class="section">Latest Machine State</div>', unsafe_allow_html=True)
+    if latest is None:
+        st.info("No prediction yet. Open Predictive Monitor and run the first analysis.")
+    else:
+        a,b = st.columns([1,1])
+        with a:
+            is_high = latest.get("Prediction") == "HIGH RISK"
+            cls = "risk-high" if is_high else "risk-low"
+            title = "HIGH RISK" if is_high else "LOW RISK"
+            st.markdown(f"""
+            <div class="risk {cls}">
+              <div class="risk-label">LATEST PREDICTIVE STATE</div>
+              <div class="risk-title">{title}</div>
+              <div class="risk-number">{float(latest.get("Failure Probability",0)):.2f}%</div>
+              <div class="risk-note">{latest.get("Machine Type")} • {latest.get("Operating Mode")} •
+              {latest.get("Saved At")}</div>
             </div>
-            """,
-            unsafe_allow_html=True
-        )
+            """,unsafe_allow_html=True)
+        with b:
+            st.markdown('<div class="card"><b style="color:#72dce5;">LATEST TELEMETRY</b><div class="divider"></div>',unsafe_allow_html=True)
+            cols=st.columns(3)
+            data=[
+                ("Temperature",latest.get("Motor Temperature"),"°C"),
+                ("Vibration",latest.get("Vibration RMS"),"RMS"),
+                ("Current",latest.get("Average Phase Current"),"A"),
+                ("Pressure",latest.get("Pressure Level"),""),
+                ("RPM",latest.get("RPM"),""),
+                ("Maintenance Load",latest.get("Maintenance Load"),""),
+            ]
+            for col,(name,val,unit) in zip(cols,data):
+                with col:
+                    st.markdown(f"""<div class="telemetry"><div class="name">{name}</div>
+                    <div class="value">{val}</div><div class="unit">{unit}</div></div>""",unsafe_allow_html=True)
+            st.markdown('</div>',unsafe_allow_html=True)
 
-    with h2:
-        st.markdown(
-            f"""
-            <div class="mini-card">
-                <div class="mini-label">HIGH RISK</div>
-                <div class="mini-value">{high_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    st.markdown('<div class="section">System Architecture</div>',unsafe_allow_html=True)
+    c=st.columns(4)
+    for col,title,desc in zip(c,
+        ["01 / SENSOR INPUT","02 / FEATURE ENGINEERING","03 / CATBOOST INFERENCE","04 / AI INTERPRETATION"],
+        ["Machine operating measurements","Derived predictive variables","Failure probability within 24h","Gemini explanation & guidance"]):
+        with col:
+            st.markdown(f"""<div class="card"><div class="kpi-label">{title}</div>
+            <div style="color:white;font-weight:800;margin-top:9px;font-size:14px;">{desc}</div></div>""",unsafe_allow_html=True)
 
-    with h3:
-        st.markdown(
-            f"""
-            <div class="mini-card">
-                <div class="mini-label">LOW RISK</div>
-                <div class="mini-value">{low_count}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+# =========================================================
+# PREDICTIVE MONITOR
+# =========================================================
+if st.session_state.page == "Predictive Monitor":
+    st.markdown('<div class="section">Predictive Monitor</div>',unsafe_allow_html=True)
+    st.markdown('<div class="sub">Configure the machine, enter live telemetry, and execute a 24-hour failure-risk analysis.</div>',unsafe_allow_html=True)
 
-    st.write("")
+    c1,c2,c3=st.columns(3)
+    with c1: machine_type=st.selectbox("Machine Type",["CNC","Pump","Compressor","Robotic Arm"])
+    with c2: operating_mode=st.selectbox("Operating Mode",["idle","normal","peak"],index=1)
+    with c3: hour=st.selectbox("Operating Hour",list(range(24)),index=12,format_func=lambda x:f"{x:02d}:00")
 
-    st.dataframe(
-        display_history,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.markdown('<div class="section">Live Telemetry</div>',unsafe_allow_html=True)
+    r1,r2,r3,r4=st.columns(4)
+    with r1: vibration_rms=st.number_input("Vibration RMS",min_value=0.0,value=1.0,step=.01)
+    with r2: temperature_motor=st.number_input("Motor Temperature (°C)",value=70.0,step=.1)
+    with r3: current_phase_avg=st.number_input("Average Phase Current (A)",min_value=0.0,value=10.0,step=.1)
+    with r4: pressure_level=st.number_input("Pressure Level",min_value=0.0,value=5.0,step=.1)
+    r5,r6,r7,r8=st.columns(4)
+    with r5: rpm=st.number_input("RPM",min_value=0.0,value=1500.0,step=10.0)
+    with r6: hours_since_maintenance=st.number_input("Hours Since Maintenance",min_value=0.0,value=100.0,step=1.0)
+    with r7: ambient_temp=st.number_input("Ambient Temperature (°C)",value=25.0,step=.1)
+    with r8: timestamp=st.date_input("Inspection Date",value=datetime.now().date())
 
-    csv_data = history.to_csv(index=False).encode("utf-8")
+    td=temperature_motor-ambient_temp
+    vr=vibration_rms/(rpm+1)
+    cr=current_phase_avg/(rpm+1)
+    pr=pressure_level/(rpm+1)
+    ml=hours_since_maintenance*rpm
+    dow=timestamp.weekday()
+    month=timestamp.month
 
-    st.download_button(
-        "⬇️ Download Prediction History (CSV)",
-        data=csv_data,
-        file_name="prediction_history.csv",
-        mime="text/csv",
-        use_container_width=False
-    )
+    st.markdown('<div class="section">Derived Predictive Signals</div>',unsafe_allow_html=True)
+    fcols=st.columns(5)
+    for col,(name,val,unit) in zip(fcols,[
+        ("Temperature Δ",f"{td:.2f}","°C"),("Vibration / RPM",f"{vr:.5f}",""),
+        ("Current / RPM",f"{cr:.5f}",""),("Pressure / RPM",f"{pr:.5f}",""),
+        ("Maintenance Load",f"{ml:,.0f}","")]):
+        with col:
+            st.markdown(f"""<div class="kpi"><div class="kpi-label">{name}</div>
+            <div class="kpi-value">{val}<span style="font-size:10px;color:#607990"> {unit}</span></div>
+            <div class="kpi-foot">Engineered feature</div></div>""",unsafe_allow_html=True)
+
+    st.markdown("<br>",unsafe_allow_html=True)
+    if st.button("⚡ EXECUTE PREDICTIVE ANALYSIS",use_container_width=True):
+        X=pd.DataFrame({
+            "machine_type":[machine_type],"vibration_rms":[vibration_rms],
+            "temperature_motor":[temperature_motor],"current_phase_avg":[current_phase_avg],
+            "pressure_level":[pressure_level],"rpm":[rpm],"operating_mode":[operating_mode],
+            "hours_since_maintenance":[hours_since_maintenance],"ambient_temp":[ambient_temp],
+            "hour":[hour],"day_of_week":[dow],"month":[month],
+            "temperature_difference":[td],"vibration_rpm_ratio":[vr],
+            "current_rpm_ratio":[cr],"pressure_rpm_ratio":[pr],"maintenance_load":[ml]
+        })
+        try:
+            with st.spinner("CatBoost inference in progress..."):
+                pred=model.predict(X)[0]
+                prob=float(model.predict_proba(X)[0][1])
+        except Exception as e:
+            st.error("Prediction failed.")
+            st.code(str(e))
+            st.stop()
+
+        fp=prob*100
+        npct=100-fp
+        record={
+            "Saved At":datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Machine Type":machine_type,"Operating Mode":operating_mode,"Date":str(timestamp),
+            "Operating Hour":hour,"Vibration RMS":vibration_rms,"Motor Temperature":temperature_motor,
+            "Average Phase Current":current_phase_avg,"Pressure Level":pressure_level,"RPM":rpm,
+            "Hours Since Maintenance":hours_since_maintenance,"Ambient Temperature":ambient_temp,
+            "Day of Week":dow,"Month":month,"Temperature Difference":td,
+            "Vibration/RPM Ratio":vr,"Current/RPM Ratio":cr,"Pressure/RPM Ratio":pr,
+            "Maintenance Load":ml,"Prediction":"HIGH RISK" if pred==1 else "LOW RISK",
+            "Failure Probability":round(fp,2),"Normal Probability":round(npct,2)
+        }
+        save_prediction(record)
+        st.session_state.current_prediction=record
+        st.session_state.last_run=datetime.now()
+
+        st.markdown('<div class="section">Decision Panel</div>',unsafe_allow_html=True)
+        a,b=st.columns([1.05,1])
+        with a:
+            cls="risk-high" if pred==1 else "risk-low"
+            title="HIGH RISK" if pred==1 else "LOW RISK"
+            st.markdown(f"""<div class="risk {cls}">
+            <div class="risk-label">CATBOOST PREDICTION</div>
+            <div class="risk-title">{title}</div>
+            <div class="risk-number">{fp:.2f}%</div>
+            <div class="risk-note">Estimated probability of failure within the next 24 hours.</div>
+            </div>""",unsafe_allow_html=True)
+        with b:
+            fig=go.Figure(go.Indicator(
+                mode="gauge+number",value=fp,
+                number={"suffix":"%","font":{"size":30,"color":"white"}},
+                gauge={"axis":{"range":[0,100],"tickcolor":"#6b8196"},
+                       "bar":{"color":"#ff5b70" if pred==1 else "#35d49a"},
+                       "bgcolor":"#0a1726","bordercolor":"#203b55",
+                       "steps":[{"range":[0,30],"color":"#09231d"},
+                                {"range":[30,70],"color":"#28220e"},
+                                {"range":[70,100],"color":"#251019"}]}))
+            fig.update_layout(height=230,margin=dict(l=20,r=20,t=25,b=10),
+                              paper_bgcolor="rgba(0,0,0,0)",font_color="white")
+            st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+
+        st.markdown('<div class="section">Telemetry Snapshot</div>',unsafe_allow_html=True)
+        tc=st.columns(6)
+        for col,(name,val,unit) in zip(tc,[
+            ("Vibration",vibration_rms,"RMS"),("Temperature",temperature_motor,"°C"),
+            ("Current",current_phase_avg,"A"),("Pressure",pressure_level,""),
+            ("RPM",rpm,""),("Maint. Load",f"{ml:,.0f}","")]):
+            with col:
+                st.markdown(f"""<div class="telemetry"><div class="name">{name}</div>
+                <div class="value">{val}</div><div class="unit">{unit}</div></div>""",unsafe_allow_html=True)
+
+        st.markdown('<div class="section">AI Maintenance Intelligence</div>',unsafe_allow_html=True)
+        with st.spinner("Gemini is interpreting the result..."):
+            ai=ask_gemini("Analyze the current prediction. Explain why the result matters, identify which supplied measurements deserve attention, and provide practical maintenance actions. Use only the supplied data.")
+        st.markdown(f"""<div class="ai"><div class="ai-title">✦ GEMINI / CONTEXT-AWARE ANALYSIS</div>
+        <div class="ai-sub">AI interpretation based on the current CatBoost prediction</div>
+        <div class="divider"></div><div style="font-size:13px;color:#dce8f2;line-height:1.85;white-space:pre-wrap">{ai}</div></div>""",unsafe_allow_html=True)
+
+# =========================================================
+# ANALYTICS
+# =========================================================
+if st.session_state.page == "Analytics":
+    st.markdown('<div class="section">Predictive Analytics</div>',unsafe_allow_html=True)
+    st.markdown('<div class="sub">Explore historical prediction behavior and machine-risk patterns.</div>',unsafe_allow_html=True)
+
+    if history.empty:
+        st.info("No historical predictions yet.")
+    else:
+        c1,c2,c3,c4=st.columns(4)
+        avg=float(history["Failure Probability"].mean()) if "Failure Probability" in history.columns else 0
+        high_rate=(high/len(history))*100 if len(history) else 0
+        metrics=[("TOTAL RUNS",len(history),"Analyses"),("HIGH-RISK RUNS",high,"Alerts"),
+                 ("HIGH-RISK RATE",f"{high_rate:.1f}%","Historical share"),("AVG FAILURE RISK",f"{avg:.1f}%","All runs")]
+        for col,(lab,val,foot) in zip([c1,c2,c3,c4],metrics):
+            with col: st.markdown(f"""<div class="kpi"><div class="kpi-label">{lab}</div>
+            <div class="kpi-value">{val}</div><div class="kpi-foot">{foot}</div></div>""",unsafe_allow_html=True)
+
+        st.markdown('<div class="section">Failure Probability Timeline</div>',unsafe_allow_html=True)
+        df=history.copy()
+        df["Saved At"]=pd.to_datetime(df["Saved At"],errors="coerce")
+        df=df.dropna(subset=["Saved At"]).tail(50)
+        fig=go.Figure()
+        fig.add_trace(go.Scatter(x=df["Saved At"],y=df["Failure Probability"],
+                                 mode="lines+markers",line=dict(color="#2dd4e5",width=2),
+                                 marker=dict(size=5),name="Failure Probability"))
+        fig.add_hline(y=70,line_dash="dash",line_color="#ff5b70",annotation_text="High-risk reference")
+        fig.update_layout(height=360,paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#071321",
+                          font_color="#8ea6ba",margin=dict(l=10,r=10,t=20,b=10),
+                          xaxis_title="",yaxis_title="Failure Probability (%)")
+        st.plotly_chart(fig,use_container_width=True,config={"displayModeBar":False})
+
+        left,right=st.columns(2)
+        with left:
+            counts=history["Prediction"].value_counts()
+            fig2=go.Figure(go.Pie(labels=counts.index,values=counts.values,hole=.68,
+                                  marker=dict(colors=["#ff5b70" if x=="HIGH RISK" else "#35d49a" for x in counts.index])))
+            fig2.update_layout(height=330,paper_bgcolor="rgba(0,0,0,0)",font_color="#b9cada",
+                               showlegend=True,margin=dict(l=10,r=10,t=20,b=10))
+            st.plotly_chart(fig2,use_container_width=True,config={"displayModeBar":False})
+        with right:
+            if "Machine Type" in history.columns and "Failure Probability" in history.columns:
+                by_machine=history.groupby("Machine Type")["Failure Probability"].mean().sort_values()
+                fig3=px.bar(by_machine,orientation="h",title="Average Failure Probability by Machine")
+                fig3.update_traces(marker_color="#4d8dff")
+                fig3.update_layout(height=330,paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="#071321",
+                                   font_color="#8ea6ba",margin=dict(l=10,r=10,t=45,b=10))
+                st.plotly_chart(fig3,use_container_width=True,config={"displayModeBar":False})
+
+        st.markdown('<div class="section">Prediction Records</div>',unsafe_allow_html=True)
+        st.dataframe(history.iloc[::-1].reset_index(drop=True),use_container_width=True,hide_index=True)
+        st.download_button("⬇ Export CSV",history.to_csv(index=False).encode("utf-8"),
+                           "prediction_history.csv","text/csv")
+
+# =========================================================
+# AI ASSISTANT
+# =========================================================
+if st.session_state.page == "AI Assistant":
+    st.markdown('<div class="section">AI Maintenance Assistant</div>',unsafe_allow_html=True)
+    st.markdown('<div class="sub">Ask Gemini about the latest machine prediction and supplied telemetry.</div>',unsafe_allow_html=True)
+
+    if st.session_state.current_prediction:
+        r=st.session_state.current_prediction
+        st.markdown(f"""<div class="ai"><div class="ai-title">CURRENT MACHINE CONTEXT</div>
+        <div class="ai-sub">{r["Machine Type"]} • {r["Operating Mode"]} • {r["Prediction"]}</div>
+        <div class="divider"></div><div style="color:#d9e6ef;font-size:12px">
+        Failure Probability <b>{r["Failure Probability"]}%</b> &nbsp; | &nbsp;
+        Temperature <b>{r["Motor Temperature"]}°C</b> &nbsp; | &nbsp;
+        Vibration <b>{r["Vibration RMS"]}</b> &nbsp; | &nbsp;
+        RPM <b>{r["RPM"]}</b></div></div>""",unsafe_allow_html=True)
+    else:
+        st.info("Run a prediction first to provide Gemini with machine context.")
+
+    st.markdown("<br>",unsafe_allow_html=True)
+    questions=[
+        "Explain the latest prediction in simple terms.",
+        "Which supplied sensor reading needs attention?",
+        "What maintenance actions should be considered?",
+        "Give me a short maintenance report."
+    ]
+    qc=st.columns(4)
+    for i,q in enumerate(questions):
+        if qc[i].button(q,key=f"quick_{i}",use_container_width=True):
+            st.session_state.chat_history.append({"role":"user","content":q})
+            st.session_state.chat_history.append({"role":"assistant","content":ask_gemini(q)})
+            st.rerun()
+
+    for m in st.session_state.chat_history:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    q=st.chat_input("Ask the maintenance AI...")
+    if q:
+        st.session_state.chat_history.append({"role":"user","content":q})
+        st.session_state.chat_history.append({"role":"assistant","content":ask_gemini(q)})
+        st.rerun()
+
+    if st.session_state.chat_history and st.button("Clear Conversation"):
+        st.session_state.chat_history=[]
+        st.rerun()
 
 # =========================================================
 # FOOTER
 # =========================================================
-st.markdown("""
-<div class="footer">
-    Predictive Maintenance Dashboard &nbsp;•&nbsp; CatBoost &nbsp;•&nbsp; 24-Hour Failure Prediction
-</div>
-""", unsafe_allow_html=True)
+st.markdown("""<div class="footer">PMAI ULTRA • INDUSTRIAL AI OPERATIONS CENTER • CATBOOST • GEMINI • 24-HOUR FAILURE PREDICTION</div>""",unsafe_allow_html=True)
